@@ -6,7 +6,7 @@ data_parser.py - 麦当劳 Push 日报数据解析模块
 import csv, io
 from datetime import datetime, timedelta
 
-# 字段名映射（与内容排行榜 mcd_content_rank 统一）
+# 字段名映射（适配新的CSV格式）
 COLS = {
     'date': '发送日期',
     'channel': '渠道',
@@ -21,6 +21,9 @@ COLS = {
     'order_click': '点击后下单人次',
     'gc': '订单GC',
     'sales': '订单Sales',
+    # 消息标题和消息内容不处理，仅用于识别表头
+    'msg_title': '消息标题',
+    'msg_content': '消息内容'
 }
 
 
@@ -36,7 +39,7 @@ def parse_csv(file_or_path):
     plan_cnt_all = {}
     owner_agg   = {}
 
-    # 支持文件对象或路径，多编码兜底（与内容排行榜统一）
+    # 支持文件对象或路径，多编码兜底（适配多种编码格式）
     if hasattr(file_or_path, 'read'):
         pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
         raw = file_or_path.read()
@@ -65,7 +68,7 @@ def parse_csv(file_or_path):
         else:
             f = open(file_or_path, encoding='utf-8', errors='replace')
 
-    reader = csv.DictReader(f)
+    reader = csv.DictReader(f, delimiter='\t')  # 使用制表符作为分隔符
 
     for row in reader:
         d   = row.get(COLS['date'], '').strip()
@@ -73,8 +76,11 @@ def parse_csv(file_or_path):
         pt  = row.get(COLS['ptype'], 'normal').strip().lower()
         pid = row.get(COLS['plan_id'], '').strip()
         own = row.get(COLS['owner'], '').strip() or '未知'
+        
+        # 跳过表头行或空日期行
         if not d or d == COLS['date']:
             continue
+            
         try:
             c  = float(row.get(COLS['click'], 0) or 0)
             r  = float(row.get(COLS['reach'], 0) or 0)
@@ -82,24 +88,44 @@ def parse_csv(file_or_path):
             s  = float(row.get(COLS['sales'], 0) or 0)
             oc = float(row.get(COLS['order_click'], 0) or 0)
             rp = float(row.get(COLS['reach_plan'], 0) or 0)
-        except:
+        except (ValueError, TypeError):
             continue
 
         # 标准化日期：去前导零
-        parts = d.split()[0].split('/')
+        parts = d.split()[0].split('/') if ' ' in d else d.split('/')
         d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
 
-        rows_raw.setdefault(d, {}).setdefault(ch, {}).setdefault(pt, {
-            'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
-        })
+        # 初始化嵌套字典结构
+        if d not in rows_raw:
+            rows_raw[d] = {}
+        if ch not in rows_raw[d]:
+            rows_raw[d][ch] = {}
+        if pt not in rows_raw[d][ch]:
+            rows_raw[d][ch][pt] = {
+                'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
+            }
+            
+        # 累加指标数据
         for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             rows_raw[d][ch][pt][k] += v
-        plan_cnt_all.setdefault(d, {}).setdefault(ch, set()).add(pid)
+        
+        # 计划ID集合统计
+        if d not in plan_cnt_all:
+            plan_cnt_all[d] = {}
+        if ch not in plan_cnt_all[d]:
+            plan_cnt_all[d][ch] = set()
+        plan_cnt_all[d][ch].add(pid)
 
         # owner 聚合（S4 数据源）
-        owner_agg.setdefault(d, {}).setdefault(pt, {}).setdefault(own, {
-            'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
-        })
+        if d not in owner_agg:
+            owner_agg[d] = {}
+        if pt not in owner_agg[d]:
+            owner_agg[d][pt] = {}
+        if own not in owner_agg[d][pt]:
+            owner_agg[d][pt][own] = {
+                'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
+            }
+            
         for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             owner_agg[d][pt][own][k] += v
 
