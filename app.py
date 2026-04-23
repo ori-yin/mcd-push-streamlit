@@ -263,15 +263,23 @@ with col2:
             if owner_agg:
                 s4_by_ptype = {}
 
+
+
+
                 uploaded.seek(0)
-                with io.BytesIO(uploaded.getvalue()) as f:
-                    reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
-                    for row in reader:
+                # 复用 data_parser.py 中的编码处理函数
+                from data_parser import read_csv_with_encoding
+                
+                f = read_csv_with_encoding(uploaded)
+                reader = csv.DictReader(f)
+                for row in reader:
                         d   = row.get(SEND_DATE, '').strip().split()[0]
                         pt  = row.get(PTYPE_COL, '').strip()
                         oid = row.get('预算owner', '[NULL]').strip()
                         if not d or d == SEND_DATE:
-                            continue
+                                continue
+                f.close()
+                
                         try:
                             c  = float(row.get(CLICK_COL, 0) or 0)
                             r  = float(row.get(REACH_COL, 0) or 0)
