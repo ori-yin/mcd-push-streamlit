@@ -7,13 +7,14 @@ import streamlit as st
 import json, csv, io
 from datetime import datetime, timedelta
 from data_parser import parse_csv, calc_date_range, totals_all, ch_totals, agg_ch_pt
+# 添加编码处理函数的导入
+from data_parser import read_csv_with_encoding
 
 st.set_page_config(
     page_title="麦当劳 Push 日报生成器",
     page_icon="📊",
     layout="wide"
 )
-
 # ─── 样式 ─────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -36,39 +37,32 @@ st.markdown("""
   }
 </style>
 """, unsafe_allow_html=True)
-
 st.markdown("""
 <div class="mcd-header">
   <h1>📊 麦当劳 App Push 日报生成器</h1>
   <p>上传数据 CSV → 自动生成 HTML 日报 → 下载发送</p>
 </div>
 """, unsafe_allow_html=True)
-
 # ─── 文件上传 ─────────────────────────────────────────────────
 col1, col2 = st.columns([1, 3], gap="large")
-
 with col1:
     st.markdown("#### ⚙️ 配置")
     st.info("📌 自动读取 CSV 中最新日期作为昨日")
     st.markdown("---")
     st.markdown("#### 📁 数据上传")
-
     uploaded = st.file_uploader(
-    "上传渠道触达 CSV",
-    type=["csv"],
-    help="CSV 字段：发送日期, 计划类型, 渠道, Plan ID, Plan名称, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
-)
-
+        "上传渠道触达 CSV",
+        type=["csv"],
+        help="CSV 字段：send_date, 计划类型, 渠道, Plan ID, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
+    )
     if uploaded:
         st.success(f"✅ {uploaded.name}", icon="📄")
-
     can_generate = uploaded is not None
     if st.button("🚀 生成日报", type="primary", use_container_width=True, disabled=not can_generate):
         st.session_state['generate'] = True
     else:
         if 'generate' not in st.session_state:
             st.session_state['generate'] = False
-
 with col2:
     if not uploaded:
         st.markdown("#### 📋 日报预览")
@@ -85,21 +79,17 @@ with col2:
         try:
             rows_raw, plan_cnt_all, owner_agg, all_dates = parse_csv(uploaded)
             DATE_Y, DATE_P, DATE_W = calc_date_range(all_dates)
-
             st.markdown(f"#### 📋 日报预览 `{DATE_Y}`")
-
             # 解析日期标签
             def fmt_d(d):
                 if not d: return '\u2014'
                 parts = d.split('/')
                 if len(parts) < 3: return str(d)
                 return f"{int(parts[1])}月{int(parts[2])}日"
-
             date_y_label = fmt_d(DATE_Y)
             date_p_label = fmt_d(DATE_P)
             date_w_start = fmt_d(DATE_W[0]) if DATE_W else '\u2014'
             date_w_end   = fmt_d(DATE_W[-1]) if DATE_W else '\u2014'
-
             ch_list = ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
             CH_NAMES = {
                 "APP Push": "APP Push",
@@ -107,11 +97,9 @@ with col2:
                 "微信小程序订阅消息": "微信小程序",
                 "短信": "短信"
             }
-
             # ── 辅助函数 ──────────────────────────────────────────
             def ctr_v(c, r):
                 return c/r*100 if r else 0
-
             def fmt(v, typ="num"):
                 if v is None: return "-"
                 if typ == "ctr": return f"{v:.2f}%"
@@ -119,36 +107,29 @@ with col2:
                 if abs(v) >= 1_000_000: return f"{v/1_000_000:.2f}M"
                 if abs(v) >= 1_000: return f"{v/1_000:.1f}K"
                 return f"{v:.0f}"
-
             def chg(y, b, pct=False):
                 if not b: return "—"
-
                 if isinstance(y, str): y = float(y.replace(b"%",b"").replace(b"pp",b""))
                 if isinstance(b, str): b = float(b.replace(b"%",b"").replace(b"pp",b""))
                 d = (y-b)/b*100
                 return f"{'+' if d>=0 else ''}{d:.1f}{'pp' if pct else '%'}"
-
             def ccls(y, b):
                 if not b: return ""
                 return "up" if y>b else "dn" if y<b else ""
-
             def pp(y, b):
                 return chg(y, b, pct=True)
-
             # ── S1 整体 KPI ────────────────────────────────────────
             metric_names = {
                 'reach_plan':'预计触达','reach':'触达成功','click':'点击人次',
                 'order_click':'点击后下单','gc':'订单GC','sales':'订单Sales'
             }
             metrics = ['reach_plan','reach','click','order_click','gc','sales']
-
             ty = totals_all(rows_raw, [DATE_Y])
             tp = totals_all(rows_raw, [DATE_P])
             tw = totals_all(rows_raw, DATE_W)
             ctr_y = ctr_v(ty['click'], ty['reach'])
             ctr_p = ctr_v(tp['click'], tp['reach'])
             ctr_w = ctr_v(tw['click'], tw['reach'])
-
             s1_rows = ""
             for m in metrics:
                 y_, p_, w_ = ty[m], tp[m], tw[m]/7
@@ -164,14 +145,12 @@ with col2:
                        f'<td class="right {ccls(ctr_y,ctr_p)}">{pp(ctr_y,ctr_p)}</td>' \
                        f'<td class="right">{ctr_w:.2f}%</td>' \
                        f'<td class="right {ccls(ctr_y,ctr_w)}">{pp(ctr_y,ctr_w)}</td></tr>\n'
-
             # ── S2 渠道明细 ──────────────────────────────────────
             metric_sections = [
                 ("触达成功", "num", lambda yc_,pc_,wc_: (yc_['reach'], pc_['reach'], wc_['reach']/7)),
                 ("CTR",      "ctr", lambda yc_,pc_,wc_: (ctr_v(yc_['click'],yc_['reach']), ctr_v(pc_['click'],pc_['reach']), ctr_v(wc_['click']/7,wc_['reach']/7))),
                 ("触达成功率","pct", lambda yc_,pc_,wc_: (yc_['reach']/yc_['reach_plan']*100 if yc_['reach_plan'] else 0, pc_['reach']/pc_['reach_plan']*100 if pc_['reach_plan'] else 0, (wc_['reach']/wc_['reach_plan']*100) if wc_['reach_plan'] else 0)),
             ]
-
             s2_rows = ""
             for metric_label, typ, extractor in metric_sections:
                 s2_rows += f'<tr class="sub-header"><td colspan="6">{metric_label}</td></tr>\n'
@@ -188,11 +167,9 @@ with col2:
                                f'<td class="right {ccls(y_v,p_v)}">{vp}</td>' \
                                f'<td class="right">{fmt(w_v,typ)}</td>' \
                                f'<td class="right {ccls(y_v,w_v)}">{vw}</td></tr>\n'
-
             # ── S3 渠道 × 计划类型 ─────────────────────────────────
             PTYPE_ORDER = ["aarr", "normal"]
             PTYPE_LABELS = {"aarr": "AARR", "normal": "Normal"}
-
             s3_html = ""
             for ch in ch_list:
                 for ptype in PTYPE_ORDER:
@@ -221,11 +198,9 @@ with col2:
                                    f'<td class="right {ccls(y_,p_)}">{vp}</td>' \
                                    f'<td class="right">{fmt(wv,typ_)}</td>' \
                                    f'<td class="right {ccls(y_,wv)}">{vw}</td></tr>\n'
-
             # ── S1 combo chart 数据 ──────────────────────────────
             s1_reach_js = json.dumps([totals_all(rows_raw, [d])['reach'] for d in all_dates], ensure_ascii=False)
             s1_ctr_js   = json.dumps([ctr_v(totals_all(rows_raw, [d])['click'], totals_all(rows_raw, [d])['reach']) for d in all_dates], ensure_ascii=False)
-
             # ── S2 chart 数据 ────────────────────────────────────
             x_dates_js  = json.dumps([fmt_d(d) for d in all_dates], ensure_ascii=False)
             ch_names_js = json.dumps({ch: CH_NAMES[ch] for ch in ch_list}, ensure_ascii=False)
@@ -234,16 +209,12 @@ with col2:
                 "微信小程序订阅消息":"#46B5D8","短信":"#888888"
             }, ensure_ascii=False)
             y_data_js = json.dumps({ch: [rows_raw.get(d,{}).get(ch,{}) for d in all_dates] for ch in ch_list}, ensure_ascii=False)
-
             # ── S3-a: AARR vs Normal ─────────────────────────────
             reach_aarr_js   = json.dumps([sum(rows_raw.get(d,{}).get(ch,{}).get('aarr',{}).get('reach',0) for ch in ch_list) for d in all_dates], ensure_ascii=False)
             reach_normal_js  = json.dumps([sum(rows_raw.get(d,{}).get(ch,{}).get('normal',{}).get('reach',0) for ch in ch_list) for d in all_dates], ensure_ascii=False)
-
             # ── S3-b: 渠道 Plan 个数 ──────────────────────────────
             plan_cnt_js = json.dumps({ch: [len(plan_cnt_all.get(d,{}).get(ch, set())) for d in all_dates] for ch in ch_list}, ensure_ascii=False)
-
             # ── HTML ───────────────────────────────────────────────
-
             # ===== S4: 按计划类型 x 预算 Owner ========================
             SEND_DATE = 'send_date'
             PTYPE_COL = '计划类型'
@@ -253,19 +224,14 @@ with col2:
             SALES_COL = '订单Sales'
             ORDER_COL = '点击后下单人次'
             PLAN_COL  = '预计触达'
-
             s4_html = ''
             s4_chart_owners_js = '[]'
             s4_chart_y_js = '[]'
             s4_chart_w_js = '[]'
-
-
             if owner_agg:
                 s4_by_ptype = {}
                 uploaded.seek(0)
-                # 复用 data_parser.py 中的编码处理函数
-                from data_parser import read_csv_with_encoding
-                
+                # 替换原来的 CSV 读取代码
                 f = read_csv_with_encoding(uploaded)
                 reader = csv.DictReader(f)
                 for row in reader:
@@ -283,25 +249,24 @@ with col2:
                         rp = float(row.get(PLAN_COL, 0) or 0)
                     except:
                         continue
-                f.close()
-
-                        if pt not in s4_by_ptype:
-                            s4_by_ptype[pt] = {}
-                        if oid not in s4_by_ptype[pt]:
-                            s4_by_ptype[pt][oid] = {'y':{},'p':{},'w':{}}
-                        if d == DATE_Y:
-                            bucket = 'y'
-                        elif d == DATE_P:
-                            bucket = 'p'
-                        elif d in DATE_W:
-                            bucket = 'w'
-                        else:
-                            continue
-                        if d not in s4_by_ptype[pt][oid][bucket]:
-                            s4_by_ptype[pt][oid][bucket][d] = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
-                        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
-                            s4_by_ptype[pt][oid][bucket][d][k] += v
-
+                    if pt not in s4_by_ptype:
+                        s4_by_ptype[pt] = {}
+                    if oid not in s4_by_ptype[pt]:
+                        s4_by_ptype[pt][oid] = {'y':{},'p':{},'w':{}}
+                    if d == DATE_Y:
+                        bucket = 'y'
+                    elif d == DATE_P:
+                        bucket = 'p'
+                    elif d in DATE_W:
+                        bucket = 'w'
+                    else:
+                        continue
+                    if d not in s4_by_ptype[pt][oid][bucket]:
+                        s4_by_ptype[pt][oid][bucket][d] = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
+                    for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
+                        s4_by_ptype[pt][oid][bucket][d][k] += v
+                f.close()  # 关闭文件
+                
                 def s4_owner_totals(pkey, owner, key):
                     data = s4_by_ptype.get(pkey, {}).get(owner, {}).get(key, {})
                     t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
@@ -312,13 +277,10 @@ with col2:
                         for k in t:
                             t[k] = t[k] / 7
                     return t
-
                 def s4_ctr(click, reach):
                     return 0.0 if reach == 0 else (click/reach*100)
-
                 OWNER_ORDER = ['Reach','BF','McCafe','Membership','MDS','Field MKT','Chicken','OMM','[NULL]']
                 PTYPE_S4    = [('aarr','AARR'), ('normal','Normal')]
-
                 s4_html = ''
                 for pkey, ptype_label in PTYPE_S4:
                     owners_in_ptype = [o for o in OWNER_ORDER if o in s4_by_ptype.get(pkey, {})]
@@ -362,13 +324,11 @@ with col2:
                             c2_class = 'up' if c2 == 'up' else 'dn' if c2 == 'dn' else ''
                             row = f'<tr><td>{name}</td><td class="right">{fmt(y_disp,typ_)}</td><td class="right">{fmt(p_disp,typ_)}</td><td class="right {c1_class}">{vp}</td><td class="right">{fmt(wv_disp,typ_)}</td><td class="right {c2_class}">{vw}</td></tr>\n'
                             s4_html += row
-
                 def s4_owner_reach(owner, key):
                     total = 0
                     for pt in ['aarr','normal']:
                         total += s4_owner_totals(pt, owner, key)['reach']
                     return total
-
                 owner_order_rev = {o: -i for i, o in enumerate(OWNER_ORDER)}
                 s4_chart_owners = sorted(
                     [o for o in OWNER_ORDER if s4_owner_reach(o, 'y') > 0],
@@ -379,7 +339,6 @@ with col2:
                 s4_chart_owners_js = json.dumps(s4_chart_owners, ensure_ascii=False)
                 s4_chart_y_js  = json.dumps(s4_chart_y, ensure_ascii=False)
                 s4_chart_w_js  = json.dumps(s4_chart_w, ensure_ascii=False)
-
             html = f"""<!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -418,7 +377,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
   </div>
   <div class="badge">日报 · {date_y_label}</div>
 </div>
-
 <div class="card">
   <div class="card-title">1. 整体 KPI</div>
   <div id="chart-s1" class="plot"></div>
@@ -427,7 +385,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     <tbody>{s1_rows}</tbody>
   </table>
 </div>
-
 <div class="card">
   <div class="card-title">2. 渠道明细</div>
   <div id="chart-s2" class="plot"></div>
@@ -436,7 +393,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     <tbody>{s2_rows}</tbody>
   </table>
 </div>
-
 <div class="card">
   <div class="card-title">3. 渠道 × 计划类型（AARR / Normal）</div>
   <div class="chart-row">
@@ -448,7 +404,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     <tbody>{s3_html}</tbody>
   </table>
 </div>
-
 <div class="card">
   <div class="card-title">4. 按计划类型 × 预算 Owner</div>
   <div id="chart-s4" class="plot"></div>
@@ -458,7 +413,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
   </table>
 </div>
 </div>
-
 <script>
 // S1 combo
 (function() {{
@@ -475,7 +429,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     margin: {{ b: 60, l: 60, r: 60, t: 40 }}, plot_bgcolor: '#fff', height: 320
   }}, {{ responsive: true }});
 }})();
-
 // S2: 渠道折线
 (function() {{
   const xLabels = {x_dates_js};
@@ -497,7 +450,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     margin: {{ b: 60, l: 60, r: 20, t: 40 }}, plot_bgcolor: '#fff', height: 320
   }}, {{ responsive: true }});
 }})();
-
 // S3-a
 (function() {{
   const x = {x_dates_js};
@@ -512,7 +464,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     margin: {{ b: 60, l: 60, r: 20, t: 40 }}, plot_bgcolor: '#fff', height: 320
   }}, {{ responsive: true }});
 }})();
-
 // S3-b
 (function() {{
   const x = {x_dates_js};
@@ -532,7 +483,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
     margin: {{ b: 60, l: 60, r: 20, t: 40 }}, plot_bgcolor: '#fff', height: 320
   }}, {{ responsive: true }});
 }})();
-
 // ---- S4: 各BU昨日触达成功 vs 上周日均横向条形图 ----
 (function() {{
   const owners = {s4_chart_owners_js};
@@ -562,10 +512,8 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 </script>
 </body>
 </html>"""
-
             # 内嵌预览
             st.components.v1.html(html, height=2400, scrolling=True)
-
             # 下载按钮
             date_str = DATE_Y.replace('/', '')
             st.download_button(
@@ -575,6 +523,5 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
                 mime="text/html",
                 use_container_width=True
             )
-
         except Exception as e:
             st.error(f"❌ 生成失败：{e}")
