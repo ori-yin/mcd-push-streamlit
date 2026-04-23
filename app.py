@@ -54,10 +54,10 @@ with col1:
     st.markdown("#### 📁 数据上传")
 
     uploaded = st.file_uploader(
-        "上传渠道触达 CSV",
-        type=["csv"],
-        help="CSV 字段：send_date, 计划类型, 渠道, Plan ID, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
-    )
+    "上传渠道触达 CSV",
+    type=["csv"],
+    help="CSV 字段：发送日期, 计划类型, 渠道, Plan ID, Plan名称, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
+)
 
     if uploaded:
         st.success(f"✅ {uploaded.name}", icon="📄")
