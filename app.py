@@ -273,11 +273,11 @@ with col2:
                 f = read_csv_with_encoding(uploaded)
                 reader = csv.DictReader(f)
                 for row in reader:
-                        d   = row.get(SEND_DATE, '').strip().split()[0]
-                        pt  = row.get(PTYPE_COL, '').strip()
-                        oid = row.get('预算owner', '[NULL]').strip()
-                        if not d or d == SEND_DATE:
-                                continue
+                    d   = row.get(SEND_DATE, '').strip().split()[0]
+                    pt  = row.get(PTYPE_COL, '').strip()
+                    oid = row.get('预算owner', '[NULL]').strip()
+                    if not d or d == SEND_DATE:
+                        continue
                 f.close()
                 
                         try:
