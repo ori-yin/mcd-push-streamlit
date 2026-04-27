@@ -4,8 +4,10 @@ app.py - 麦当劳 Push 日报生成器 (Streamlit Web App)
 使用方法：streamlit run app.py
 """
 import streamlit as st
-import json, csv, io
+import json, csv, io, traceback
 from datetime import datetime, timedelta
+from io import BytesIO
+import pandas as pd
 from data_parser import parse_csv, calc_date_range, totals_all, ch_totals, agg_ch_pt
 
 st.set_page_config(
@@ -264,19 +266,26 @@ with col2:
             if owner_agg:
                 s4_by_ptype = {}
 
-                uploaded.seek(0)
-                with io.BytesIO(uploaded.getvalue()) as f:
-                    # 硬编码 UTF-8 → 改为 GBK，与内容排行榜一致
+                # ── 与内容排行榜一致的 CSV 读取方式 ─────────────────────────
+                # bytes → BytesIO → pd.read_csv（多编码兜底），去掉最后两列
+                bytes_data = uploaded.read()
+                encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
+                df_s4 = None
+                for enc in encodings:
                     try:
-                        tw = io.TextIOWrapper(f, encoding='gbk')
-                    except UnicodeDecodeError:
-                        tw = io.TextIOWrapper(f, encoding='utf-8', errors='replace')
-                    reader = csv.DictReader(tw)
-                    for row in reader:
-                        d   = row.get(SEND_DATE, '').strip().split()[0]
-                        pt  = row.get(PTYPE_COL, '').strip()
-                        oid = row.get('预算owner', '[NULL]').strip()
-                        if not d or d == SEND_DATE:
+                        df_s4 = pd.read_csv(BytesIO(bytes_data), encoding=enc, on_bad_lines='skip')
+                        break
+                    except Exception:
+                        continue
+                if df_s4 is not None and len(df_s4.columns) >= 2:
+                    df_s4 = df_s4.iloc[:, :-2]
+
+                if df_s4 is not None:
+                    for _, row in df_s4.iterrows():
+                        d   = str(row.get(SEND_DATE, '')).strip().split()[0]
+                        pt  = str(row.get(PTYPE_COL, '')).strip()
+                        oid = str(row.get('预算owner', '[NULL]')).strip()
+                        if not d or d == 'nan' or d == SEND_DATE:
                             continue
                         try:
                             c  = float(row.get(CLICK_COL, 0) or 0)
@@ -285,12 +294,12 @@ with col2:
                             s  = float(row.get(SALES_COL, 0) or 0)
                             oc = float(row.get(ORDER_COL, 0) or 0)
                             rp = float(row.get(PLAN_COL, 0) or 0)
-                        except:
+                        except (ValueError, TypeError):
                             continue
                         if pt not in s4_by_ptype:
                             s4_by_ptype[pt] = {}
                         if oid not in s4_by_ptype[pt]:
-                            s4_by_ptype[pt][oid] = {'y':{},'p':{},'w':{}}
+                            s4_by_ptype[pt][oid] = {'y': {}, 'p': {}, 'w': {}}
                         if d == DATE_Y:
                             bucket = 'y'
                         elif d == DATE_P:
@@ -300,8 +309,8 @@ with col2:
                         else:
                             continue
                         if d not in s4_by_ptype[pt][oid][bucket]:
-                            s4_by_ptype[pt][oid][bucket][d] = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
-                        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
+                            s4_by_ptype[pt][oid][bucket][d] = {'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0}
+                        for k, v in [('click', c), ('reach', r), ('gc', g), ('sales', s), ('order_click', oc), ('reach_plan', rp)]:
                             s4_by_ptype[pt][oid][bucket][d][k] += v
 
                 def s4_owner_totals(pkey, owner, key):
@@ -579,4 +588,4 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
             )
 
         except Exception as e:
-            st.error(f"❌ 生成失败：{e}")
+            st.error(f"❌ 生成失败：{e}\n\n```\n{traceback.format_exc()}\n```")
