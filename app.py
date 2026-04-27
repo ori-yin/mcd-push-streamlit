@@ -266,7 +266,12 @@ with col2:
 
                 uploaded.seek(0)
                 with io.BytesIO(uploaded.getvalue()) as f:
-                    reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
+                    # 硬编码 UTF-8 → 改为 GBK，与内容排行榜一致
+                    try:
+                        tw = io.TextIOWrapper(f, encoding='gbk')
+                    except UnicodeDecodeError:
+                        tw = io.TextIOWrapper(f, encoding='utf-8', errors='replace')
+                    reader = csv.DictReader(tw)
                     for row in reader:
                         d   = row.get(SEND_DATE, '').strip().split()[0]
                         pt  = row.get(PTYPE_COL, '').strip()
