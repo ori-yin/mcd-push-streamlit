@@ -46,7 +46,8 @@ def parse_csv(file_or_path):
             if raw.startswith(b'\xef\xbb\xbf'):
                 text = raw.decode('utf-8-sig')
             else:
-                for enc in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'windows-1252', 'latin1']:
+                # GBK 优先（与内容排行榜一致），再试 UTF-8
+                for enc in ['gbk', 'gb2312', 'utf-8', 'utf-8-sig', 'gb18030', 'windows-1252', 'latin1']:
                     try:
                         text = raw.decode(enc)
                         break
@@ -62,8 +63,8 @@ def parse_csv(file_or_path):
             file_or_path.seek(pos)
         f = io.StringIO(text)
     else:
-        # 本地文件路径
-        for enc in ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'gb18030', 'windows-1252']:
+        # 本地文件路径（GBK 优先，与内容排行榜一致）
+        for enc in ['gbk', 'gb2312', 'utf-8', 'utf-8-sig', 'gb18030', 'windows-1252']:
             try:
                 f = open(file_or_path, encoding=enc)
                 break
