@@ -6,13 +6,13 @@ data_parser.py - 麦当劳 Push 日报数据解析模块
 import csv, io
 from datetime import datetime, timedelta
 
-# 字段名映射
+# 字段名映射（与内容排行榜 mcd_content_rank 统一）
 COLS = {
-    'date': 'send_date',
+    'date': '发送日期',
     'channel': '渠道',
     'ptype': '计划类型',
     'plan_id': 'Plan ID',
-    'plan_name': 'Plan Name',
+    'plan_name': 'Plan名称',
     'owner': '预算owner',
     'coupon': '是否用券',
     'reach_plan': '预计触达',
@@ -25,27 +25,56 @@ COLS = {
 
 
 def parse_csv(file_or_path):
-    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates)
+    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels)
 
-    rows_raw:    date → channel → ptype → metrics
+    rows_raw:     date → channel → ptype → metrics
     plan_cnt_all: date → channel → set(plan_id)
-    owner_agg:   date → ptype → owner → metrics
-    all_dates:   sorted list of dates
+    owner_agg:    date → ptype → owner → metrics
+    all_dates:     sorted list of dates
+    all_channels: sorted list of unique channel names from data
     """
     rows_raw    = {}
     plan_cnt_all = {}
     owner_agg   = {}
 
-    # 支持文件对象或路径
+    # 支持文件对象或路径，多编码兜底 + CRLF 兼容
     if hasattr(file_or_path, 'read'):
         pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
         raw = file_or_path.read()
-        text = raw.decode('utf-8') if isinstance(raw, bytes) else raw
+        if isinstance(raw, bytes):
+            # BOM 优先检测
+            if raw.startswith(b'\xef\xbb\xbf'):
+                text = raw.decode('utf-8-sig')
+            else:
+                for enc in ['utf-8', 'gbk', 'gb2312', 'gb18030', 'windows-1252', 'latin1']:
+                    try:
+                        text = raw.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    text = raw.decode('utf-8', errors='replace')
+        else:
+            text = raw
+        # 统一 CRLF → LF
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
         if hasattr(file_or_path, 'seek'):
             file_or_path.seek(pos)
         f = io.StringIO(text)
     else:
-        f = open(file_or_path, encoding='utf-8')
+        # 本地文件路径
+        for enc in ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'gb18030', 'windows-1252']:
+            try:
+                f = open(file_or_path, encoding=enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            f = open(file_or_path, encoding='utf-8', errors='replace')
+        # 统一 CRLF → LF
+        content = f.read().replace('\r\n', '\n').replace('\r', '\n')
+        f.close()
+        f = io.StringIO(content)
 
     reader = csv.DictReader(f)
 
@@ -85,13 +114,16 @@ def parse_csv(file_or_path):
         for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             owner_agg[d][pt][own][k] += v
 
+    # 收集所有渠道（保持顺序）
+    all_channels = sorted(set(rows_raw.get(d, {}).keys() for d in rows_raw))
+
     f.close()
 
     def _key(d):
         p = d.split('/')
         return (int(p[1]), int(p[2]))
     all_dates = sorted(rows_raw.keys(), key=_key)
-    return rows_raw, plan_cnt_all, owner_agg, all_dates
+    return rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels
 
 
 def calc_date_range(all_dates):
