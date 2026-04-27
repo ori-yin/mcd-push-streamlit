@@ -5,6 +5,7 @@ data_parser.py - 麦当劳 Push 日报数据解析模块
 """
 import csv, io
 from datetime import datetime, timedelta
+import pandas as pd  # noqa: F401
 
 # 字段名映射（与内容排行榜 mcd_content_rank 统一）
 COLS = {
@@ -37,33 +38,23 @@ def parse_csv(file_or_path):
     plan_cnt_all = {}
     owner_agg   = {}
 
-    # 支持文件对象或路径，多编码兜底 + CRLF 兼容
+    # 支持文件对象（Streamlit 上传）或本地路径
+    # 上传文件对象：用 pd.read_csv 直接读（与内容排行榜一致），GBK 优先
+    # 本地文件路径：用 csv.DictReader + 多编码兜底
     if hasattr(file_or_path, 'read'):
-        pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
-        raw = file_or_path.read()
-        if isinstance(raw, bytes):
-            # BOM 优先检测
-            if raw.startswith(b'\xef\xbb\xbf'):
-                text = raw.decode('utf-8-sig')
-            else:
-                # GBK 优先（与内容排行榜一致），再试 UTF-8
-                for enc in ['gbk', 'gb2312', 'utf-8', 'utf-8-sig', 'gb18030', 'windows-1252', 'latin1']:
-                    try:
-                        text = raw.decode(enc)
-                        break
-                    except UnicodeDecodeError:
-                        continue
-                else:
-                    text = raw.decode('utf-8', errors='replace')
-        else:
-            text = raw
-        # 统一 CRLF → LF
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        if hasattr(file_or_path, 'seek'):
-            file_or_path.seek(pos)
-        f = io.StringIO(text)
+        # uploaded file — 直接用 pd.read_csv，GBK 兜 UTF-8/UTF-8-sig
+        try:
+            df = pd.read_csv(file_or_path, encoding='gbk', on_bad_lines='skip')
+        except Exception:
+            try:
+                df = pd.read_csv(file_or_path, encoding='utf-8', on_bad_lines='skip')
+            except Exception:
+                df = pd.read_csv(file_or_path, encoding='utf-8-sig', on_bad_lines='skip')
+        # 转为 csv.DictReader 兼容的行迭代方式
+        f = io.StringIO(df.to_csv(index=False, lineterminator='\n'))
+        reader = csv.DictReader(f)
     else:
-        # 本地文件路径（GBK 优先，与内容排行榜一致）
+        # 本地文件路径
         for enc in ['gbk', 'gb2312', 'utf-8', 'utf-8-sig', 'gb18030', 'windows-1252']:
             try:
                 f = open(file_or_path, encoding=enc)
@@ -72,12 +63,10 @@ def parse_csv(file_or_path):
                 continue
         else:
             f = open(file_or_path, encoding='utf-8', errors='replace')
-        # 统一 CRLF → LF
         content = f.read().replace('\r\n', '\n').replace('\r', '\n')
         f.close()
         f = io.StringIO(content)
-
-    reader = csv.DictReader(f)
+        reader = csv.DictReader(f)
 
     for row in reader:
         d   = row.get(COLS['date'], '').strip()
