@@ -56,7 +56,7 @@ with col1:
     uploaded = st.file_uploader(
         "上传渠道触达 CSV",
         type=["csv"],
-        help="CSV 字段：send_date, 计划类型, 渠道, Plan ID, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
+        help="CSV 字段：发送日期, 计划类型, 渠道, Plan ID, Plan名称, 预算owner, 是否用券, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales（最后两列消息标题/消息内容可不填）"
     )
 
     if uploaded:
@@ -83,7 +83,7 @@ with col2:
     else:
         # ── 生成逻辑 ──────────────────────────────────────────────
         try:
-            rows_raw, plan_cnt_all, owner_agg, all_dates = parse_csv(uploaded)
+            rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels = parse_csv(uploaded)
             DATE_Y, DATE_P, DATE_W = calc_date_range(all_dates)
 
             st.markdown(f"#### 📋 日报预览 `{DATE_Y}`")
@@ -100,13 +100,14 @@ with col2:
             date_w_start = fmt_d(DATE_W[0]) if DATE_W else '\u2014'
             date_w_end   = fmt_d(DATE_W[-1]) if DATE_W else '\u2014'
 
-            ch_list = ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
-            CH_NAMES = {
+            # 渠道显示名映射（未知渠道直接显示原名）
+            CH_NAME_MAP = {
                 "APP Push": "APP Push",
                 "企微1v1": "企微1v1",
                 "微信小程序订阅消息": "微信小程序",
                 "短信": "短信"
             }
+            ch_list = all_channels if all_channels else ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
 
             # ── 辅助函数 ──────────────────────────────────────────
             def ctr_v(c, r):
@@ -182,7 +183,7 @@ with col2:
                     y_v, p_v, w_v = extractor(yc_, pc_, wc_)
                     vp = pp(y_v, p_v) if typ in ("ctr","pct") else chg(y_v, p_v)
                     vw = pp(y_v, w_v) if typ in ("ctr","pct") else chg(y_v, w_v)
-                    s2_rows += f'<tr><td class="metric-name">{CH_NAMES[ch]}</td>' \
+                    s2_rows += f'<tr><td class="metric-name">{CH_NAME_MAP.get(ch, ch)}</td>' \
                                f'<td class="right">{fmt(y_v,typ)}</td>' \
                                f'<td class="right">{fmt(p_v,typ)}</td>' \
                                f'<td class="right {ccls(y_v,p_v)}">{vp}</td>' \
@@ -201,7 +202,7 @@ with col2:
                     wd  = agg_ch_pt(rows_raw, ch, ptype, DATE_W)
                     if all(yd[k]==0 for k in ['reach','click','order_click','gc','sales']):
                         continue
-                    label = f"{CH_NAMES[ch]} / {PTYPE_LABELS[ptype]}"
+                    label = f"{CH_NAME_MAP.get(ch, ch)} / {PTYPE_LABELS[ptype]}"
                     s3_html += f'<tr class="sub-header"><td colspan="6">{label}</td></tr>\n'
                     for name, y_, p_, wv, is_ctr in [
                         ("预计触达",   yd['reach_plan'],  pd_['reach_plan'],  wd['reach_plan']/7,  False),
@@ -228,7 +229,7 @@ with col2:
 
             # ── S2 chart 数据 ────────────────────────────────────
             x_dates_js  = json.dumps([fmt_d(d) for d in all_dates], ensure_ascii=False)
-            ch_names_js = json.dumps({ch: CH_NAMES[ch] for ch in ch_list}, ensure_ascii=False)
+            ch_names_js = json.dumps({ch: CH_NAME_MAP.get(ch, ch) for ch in ch_list}, ensure_ascii=False)
             ch_colors_js = json.dumps({
                 "APP Push":"#DA291C","企微1v1":"#FFC72C",
                 "微信小程序订阅消息":"#46B5D8","短信":"#888888"
