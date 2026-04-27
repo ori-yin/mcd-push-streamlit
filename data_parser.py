@@ -114,8 +114,8 @@ def parse_csv(file_or_path):
         for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             owner_agg[d][pt][own][k] += v
 
-    # 收集所有渠道（保持顺序）
-    all_channels = sorted(set(rows_raw.get(d, {}).keys() for d in rows_raw))
+    # 收集所有渠道（去重排序）
+    all_channels = sorted({ch for d in rows_raw for ch in rows_raw[d]})
 
     f.close()
 
