@@ -4,10 +4,8 @@ app.py - 麦当劳 Push 日报生成器 (Streamlit Web App)
 使用方法：streamlit run app.py
 """
 import streamlit as st
-import json, csv, io, traceback
+import json, csv, io
 from datetime import datetime, timedelta
-from io import BytesIO
-import pandas as pd
 from data_parser import parse_csv, calc_date_range, totals_all, ch_totals, agg_ch_pt
 
 st.set_page_config(
@@ -58,7 +56,7 @@ with col1:
     uploaded = st.file_uploader(
         "上传渠道触达 CSV",
         type=["csv"],
-        help="CSV 字段：发送日期, 计划类型, 渠道, Plan ID, Plan名称, 预算owner, 是否用券, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales（最后两列消息标题/消息内容可不填）"
+        help="CSV 字段：send_date, 计划类型, 渠道, Plan ID, 预算owner, 预计触达, 触达成功, 点击人次, 点击后下单人次, 订单GC, 订单Sales"
     )
 
     if uploaded:
@@ -85,7 +83,7 @@ with col2:
     else:
         # ── 生成逻辑 ──────────────────────────────────────────────
         try:
-            rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels, all_ptypes = parse_csv(uploaded)
+            rows_raw, plan_cnt_all, owner_agg, all_dates = parse_csv(uploaded)
             DATE_Y, DATE_P, DATE_W = calc_date_range(all_dates)
 
             st.markdown(f"#### 📋 日报预览 `{DATE_Y}`")
@@ -102,20 +100,13 @@ with col2:
             date_w_start = fmt_d(DATE_W[0]) if DATE_W else '\u2014'
             date_w_end   = fmt_d(DATE_W[-1]) if DATE_W else '\u2014'
 
-            # 渠道显示名映射（未知渠道直接显示原名）
-            CH_NAME_MAP = {
+            ch_list = ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
+            CH_NAMES = {
                 "APP Push": "APP Push",
                 "企微1v1": "企微1v1",
                 "微信小程序订阅消息": "微信小程序",
                 "短信": "短信"
             }
-            ch_list = all_channels if all_channels else ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
-
-            # 计划类型从数据动态读取
-            PTYPE_LABELS = {}
-            for pt in all_ptypes:
-                PTYPE_LABELS[pt] = pt.upper() if pt.isalpha() else pt.title()
-            ptype_list = all_ptypes if all_ptypes else ["aarr", "normal"]
 
             # ── 辅助函数 ──────────────────────────────────────────
             def ctr_v(c, r):
@@ -191,7 +182,7 @@ with col2:
                     y_v, p_v, w_v = extractor(yc_, pc_, wc_)
                     vp = pp(y_v, p_v) if typ in ("ctr","pct") else chg(y_v, p_v)
                     vw = pp(y_v, w_v) if typ in ("ctr","pct") else chg(y_v, w_v)
-                    s2_rows += f'<tr><td class="metric-name">{CH_NAME_MAP.get(ch, ch)}</td>' \
+                    s2_rows += f'<tr><td class="metric-name">{CH_NAMES[ch]}</td>' \
                                f'<td class="right">{fmt(y_v,typ)}</td>' \
                                f'<td class="right">{fmt(p_v,typ)}</td>' \
                                f'<td class="right {ccls(y_v,p_v)}">{vp}</td>' \
@@ -199,15 +190,18 @@ with col2:
                                f'<td class="right {ccls(y_v,w_v)}">{vw}</td></tr>\n'
 
             # ── S3 渠道 × 计划类型 ─────────────────────────────────
+            PTYPE_ORDER = ["aarr", "normal"]
+            PTYPE_LABELS = {"aarr": "AARR", "normal": "Normal"}
+
             s3_html = ""
             for ch in ch_list:
-                for ptype in ptype_list:
+                for ptype in PTYPE_ORDER:
                     yd  = agg_ch_pt(rows_raw, ch, ptype, [DATE_Y])
                     pd_ = agg_ch_pt(rows_raw, ch, ptype, [DATE_P])
                     wd  = agg_ch_pt(rows_raw, ch, ptype, DATE_W)
                     if all(yd[k]==0 for k in ['reach','click','order_click','gc','sales']):
                         continue
-                    label = f"{CH_NAME_MAP.get(ch, ch)} / {PTYPE_LABELS.get(ptype, ptype)}"
+                    label = f"{CH_NAMES[ch]} / {PTYPE_LABELS[ptype]}"
                     s3_html += f'<tr class="sub-header"><td colspan="6">{label}</td></tr>\n'
                     for name, y_, p_, wv, is_ctr in [
                         ("预计触达",   yd['reach_plan'],  pd_['reach_plan'],  wd['reach_plan']/7,  False),
@@ -234,26 +228,16 @@ with col2:
 
             # ── S2 chart 数据 ────────────────────────────────────
             x_dates_js  = json.dumps([fmt_d(d) for d in all_dates], ensure_ascii=False)
-            ch_names_js = json.dumps({ch: CH_NAME_MAP.get(ch, ch) for ch in ch_list}, ensure_ascii=False)
-            # 渠道颜色（为未知渠道分配默认色）
-            DEFAULT_CH_COLORS = ["#DA291C", "#FFC72C", "#46B5D8", "#888888", "#6B5B95", "#88B04B", "#F7CAC9", "#92A8D1", "#955251"]
-            ch_colors_map = {
+            ch_names_js = json.dumps({ch: CH_NAMES[ch] for ch in ch_list}, ensure_ascii=False)
+            ch_colors_js = json.dumps({
                 "APP Push":"#DA291C","企微1v1":"#FFC72C",
                 "微信小程序订阅消息":"#46B5D8","短信":"#888888"
-            }
-            for i, ch in enumerate(ch_list):
-                if ch not in ch_colors_map:
-                    ch_colors_map[ch] = DEFAULT_CH_COLORS[i % len(DEFAULT_CH_COLORS)]
-            ch_colors_js = json.dumps(ch_colors_map, ensure_ascii=False)
+            }, ensure_ascii=False)
             y_data_js = json.dumps({ch: [rows_raw.get(d,{}).get(ch,{}) for d in all_dates] for ch in ch_list}, ensure_ascii=False)
 
-            # S3-a chart: 动态计划类型折线
-            PTYPE_CHART_COLORS = ["#DA291C", "#46B5D8", "#FFC72C", "#6B5B95", "#88B04B", "#92A8D1"]
-            s3a_traces_js = []
-            for i, pt in enumerate(ptype_list):
-                s3a_traces_js.append(f"{{{{ x, y: {reach_ptype_js[pt]}, type: 'scatter', mode: 'lines+markers', name: '{PTYPE_LABELS.get(pt, pt)}', line: {{{{ color: '{PTYPE_CHART_COLORS[i % len(PTYPE_CHART_COLORS)]}', width: 2 }}}}, marker: {{{{ size: 5 }}}}, hovertemplate: '%{{y:.0f}}<extra></extra>' }}}}")
-            s3a_traces_str = ',\n    '.join(s3a_traces_js)
-            ptype_names_str = ' / '.join([PTYPE_LABELS.get(pt, pt) for pt in ptype_list])
+            # ── S3-a: AARR vs Normal ─────────────────────────────
+            reach_aarr_js   = json.dumps([sum(rows_raw.get(d,{}).get(ch,{}).get('aarr',{}).get('reach',0) for ch in ch_list) for d in all_dates], ensure_ascii=False)
+            reach_normal_js  = json.dumps([sum(rows_raw.get(d,{}).get(ch,{}).get('normal',{}).get('reach',0) for ch in ch_list) for d in all_dates], ensure_ascii=False)
 
             # ── S3-b: 渠道 Plan 个数 ──────────────────────────────
             plan_cnt_js = json.dumps({ch: [len(plan_cnt_all.get(d,{}).get(ch, set())) for d in all_dates] for ch in ch_list}, ensure_ascii=False)
@@ -279,26 +263,14 @@ with col2:
             if owner_agg:
                 s4_by_ptype = {}
 
-                # ── 与内容排行榜一致的 CSV 读取方式 ─────────────────────────
-                # bytes → BytesIO → pd.read_csv（多编码兜底），去掉最后两列
-                bytes_data = uploaded.read()
-                encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
-                df_s4 = None
-                for enc in encodings:
-                    try:
-                        df_s4 = pd.read_csv(BytesIO(bytes_data), encoding=enc, on_bad_lines='skip')
-                        break
-                    except Exception:
-                        continue
-                if df_s4 is not None and len(df_s4.columns) >= 2:
-                    df_s4 = df_s4.iloc[:, :-2]
-
-                if df_s4 is not None:
-                    for _, row in df_s4.iterrows():
-                        d   = str(row.get(SEND_DATE, '')).strip().split()[0]
-                        pt  = str(row.get(PTYPE_COL, '')).strip()
-                        oid = str(row.get('预算owner', '[NULL]')).strip()
-                        if not d or d == 'nan' or d == SEND_DATE:
+                uploaded.seek(0)
+                with io.BytesIO(uploaded.getvalue()) as f:
+                    reader = csv.DictReader(io.TextIOWrapper(f, encoding='utf-8'))
+                    for row in reader:
+                        d   = row.get(SEND_DATE, '').strip().split()[0]
+                        pt  = row.get(PTYPE_COL, '').strip()
+                        oid = row.get('预算owner', '[NULL]').strip()
+                        if not d or d == SEND_DATE:
                             continue
                         try:
                             c  = float(row.get(CLICK_COL, 0) or 0)
@@ -307,12 +279,12 @@ with col2:
                             s  = float(row.get(SALES_COL, 0) or 0)
                             oc = float(row.get(ORDER_COL, 0) or 0)
                             rp = float(row.get(PLAN_COL, 0) or 0)
-                        except (ValueError, TypeError):
+                        except:
                             continue
                         if pt not in s4_by_ptype:
                             s4_by_ptype[pt] = {}
                         if oid not in s4_by_ptype[pt]:
-                            s4_by_ptype[pt][oid] = {'y': {}, 'p': {}, 'w': {}}
+                            s4_by_ptype[pt][oid] = {'y':{},'p':{},'w':{}}
                         if d == DATE_Y:
                             bucket = 'y'
                         elif d == DATE_P:
@@ -322,8 +294,8 @@ with col2:
                         else:
                             continue
                         if d not in s4_by_ptype[pt][oid][bucket]:
-                            s4_by_ptype[pt][oid][bucket][d] = {'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0}
-                        for k, v in [('click', c), ('reach', r), ('gc', g), ('sales', s), ('order_click', oc), ('reach_plan', rp)]:
+                            s4_by_ptype[pt][oid][bucket][d] = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
+                        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
                             s4_by_ptype[pt][oid][bucket][d][k] += v
 
                 def s4_owner_totals(pkey, owner, key):
@@ -341,7 +313,7 @@ with col2:
                     return 0.0 if reach == 0 else (click/reach*100)
 
                 OWNER_ORDER = ['Reach','BF','McCafe','Membership','MDS','Field MKT','Chicken','OMM','[NULL]']
-                PTYPE_S4    = [(pt, PTYPE_LABELS.get(pt, pt)) for pt in ptype_list]
+                PTYPE_S4    = [('aarr','AARR'), ('normal','Normal')]
 
                 s4_html = ''
                 for pkey, ptype_label in PTYPE_S4:
@@ -389,7 +361,7 @@ with col2:
 
                 def s4_owner_reach(owner, key):
                     total = 0
-                    for pt in ptype_list:
+                    for pt in ['aarr','normal']:
                         total += s4_owner_totals(pt, owner, key)['reach']
                     return total
 
@@ -522,13 +494,14 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
   }}, {{ responsive: true }});
 }})();
 
-// S3-a: 按计划类型触达趋势（动态）
+// S3-a
 (function() {{
   const x = {x_dates_js};
   Plotly.newPlot('chart-s3a', [
-    {s3a_traces_str}
+    {{ x, y: {reach_aarr_js}, type: 'scatter', mode: 'lines+markers', name: 'AARR', line: {{ color: '#DA291C', width: 2 }}, marker: {{ size: 5 }}, hovertemplate: '%{{y:.0f}}<extra></extra>' }},
+    {{ x, y: {reach_normal_js}, type: 'scatter', mode: 'lines+markers', name: 'Normal', line: {{ color: '#46B5D8', width: 2 }}, marker: {{ size: 5 }}, hovertemplate: '%{{y:.0f}}<extra></extra>' }}
   ], {{
-    title: {{ text: '{ptype_names_str} 触达成功', font: {{ size: 13, color: '#DA291C' }}, x: 0.5 }},
+    title: {{ text: 'AARR vs Normal 触达成功', font: {{ size: 13, color: '#DA291C' }}, x: 0.5 }},
     yaxis: {{ title: '触达成功', titlefont: {{ size: 11 }}, tickfont: {{ size: 10 }}, gridcolor: '#f0f0f0', rangemode: 'tozero' }},
     xaxis: {{ tickfont: {{ size: 10 }}, gridcolor: '#f0f0f0', tickangle: -30 }},
     legend: {{ orientation: 'h', y: -0.2, font: {{ size: 11 }} }},
@@ -600,4 +573,4 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
             )
 
         except Exception as e:
-            st.error(f"❌ 生成失败：{e}\n\n```\n{traceback.format_exc()}\n```")
+            st.error(f"❌ 生成失败：{e}")
