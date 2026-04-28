@@ -28,13 +28,14 @@ COLS = {
 
 
 def parse_csv(file_or_path):
-    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels)
+    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels, all_ptypes)
 
     rows_raw:     date → channel → ptype → metrics
     plan_cnt_all: date → channel → set(plan_id)
     owner_agg:    date → ptype → owner → metrics
     all_dates:     sorted list of dates
     all_channels: sorted list of unique channel names from data
+    all_ptypes:   sorted list of unique plan types from data
 
     读取方式与内容排行榜完全一致：
     1. uploaded 文件：bytes_data = f.read() → BytesIO → pd.read_csv(encoding=enc)
@@ -120,12 +121,15 @@ def parse_csv(file_or_path):
     # 收集所有渠道（去重排序）
     all_channels = sorted({ch for d in rows_raw for ch in rows_raw[d]})
 
+    # 收集所有计划类型（去重排序）
+    all_ptypes = sorted({pt for d in rows_raw for ch in rows_raw[d] for pt in rows_raw[d][ch]})
+
     def _key(d):
         p = d.split('/')
         return (int(p[1]), int(p[2]))
 
     all_dates = sorted(rows_raw.keys(), key=_key)
-    return rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels
+    return rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels, all_ptypes
 
 
 def calc_date_range(all_dates):
@@ -183,13 +187,15 @@ def agg_ch_pt(rows_raw, ch, ptype, dates):
     return t
 
 
-def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
+def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, all_ptypes=None):
     """计算 S4 按 Owner 数据
     返回: {
-        'aarr':  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
-        'normal': [...]
+        ptype:  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
+        ...
     }
     """
+    if all_ptypes is None:
+        all_ptypes = ['aarr', 'normal']
     METRICS = ['reach', 'click', 'order_click', 'gc', 'sales', 'reach_plan']
 
     def _sum(dates, ptype, owner):
@@ -207,7 +213,7 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
         return m['click'] / m['reach'] * 100 if m['reach'] else 0
 
     result = {}
-    for ptype in ['aarr', 'normal']:
+    for ptype in all_ptypes:
         owners = set()
         for d, pts in owner_agg.items():
             if ptype in pts:
