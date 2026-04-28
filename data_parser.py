@@ -2,20 +2,17 @@
 """
 data_parser.py - 麦当劳 Push 日报数据解析模块
 支持 Streamlit 上传和本地 CSV 两种模式
-与内容排行榜 mcd_content_rank 完全一致的读取方式
 """
-import io
+import csv, io
 from datetime import datetime, timedelta
-from io import BytesIO
-import pandas as pd
 
-# 字段名映射（与内容排行榜 mcd_content_rank 统一）
+# 字段名映射
 COLS = {
-    'date': '发送日期',
+    'date': 'send_date',
     'channel': '渠道',
     'ptype': '计划类型',
     'plan_id': 'Plan ID',
-    'plan_name': 'Plan名称',
+    'plan_name': 'Plan Name',
     'owner': '预算owner',
     'coupon': '是否用券',
     'reach_plan': '预计触达',
@@ -28,64 +25,38 @@ COLS = {
 
 
 def parse_csv(file_or_path):
-    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels, all_ptypes)
+    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates)
 
-    rows_raw:     date → channel → ptype → metrics
+    rows_raw:    date → channel → ptype → metrics
     plan_cnt_all: date → channel → set(plan_id)
-    owner_agg:    date → ptype → owner → metrics
-    all_dates:     sorted list of dates
-    all_channels: sorted list of unique channel names from data
-    all_ptypes:   sorted list of unique plan types from data
-
-    读取方式与内容排行榜完全一致：
-    1. uploaded 文件：bytes_data = f.read() → BytesIO → pd.read_csv(encoding=enc)
-    2. 自动去掉最后两列（消息标题、消息内容）
+    owner_agg:   date → ptype → owner → metrics
+    all_dates:   sorted list of dates
     """
     rows_raw    = {}
     plan_cnt_all = {}
     owner_agg   = {}
 
-    # ── 读取 CSV（与内容排行榜完全一致）────────────────────────────
+    # 支持文件对象或路径
     if hasattr(file_or_path, 'read'):
-        # Streamlit 上传文件：bytes → BytesIO → pd.read_csv
-        bytes_data = file_or_path.read()
-        encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
-        df = None
-        for enc in encodings:
-            try:
-                df = pd.read_csv(BytesIO(bytes_data), encoding=enc, on_bad_lines='skip')
-                break
-            except Exception:
-                continue
-        if df is None:
-            raise ValueError("无法读取 CSV 文件，请检查文件格式")
+        pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
+        raw = file_or_path.read()
+        text = raw.decode('utf-8') if isinstance(raw, bytes) else raw
+        if hasattr(file_or_path, 'seek'):
+            file_or_path.seek(pos)
+        f = io.StringIO(text)
     else:
-        # 本地文件路径
-        for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
-            try:
-                df = pd.read_csv(file_or_path, encoding=enc, on_bad_lines='skip')
-                break
-            except Exception:
-                continue
-        if df is None:
-            raise ValueError("无法读取 CSV 文件，请检查文件格式")
+        f = open(file_or_path, encoding='utf-8')
 
-    # ── 去掉最后两列（消息标题、消息内容），与内容排行榜一致 ──────
-    if len(df.columns) >= 2:
-        df = df.iloc[:, :-2]
+    reader = csv.DictReader(f)
 
-    # ── 从 DataFrame 构建 rows_raw / plan_cnt_all / owner_agg ─────
-    # 与原来 csv.DictReader 等价的逻辑，但通过 pandas 实现
-    for _, row in df.iterrows():
-        d   = str(row.get(COLS['date'], '')).strip()
-        ch  = str(row.get(COLS['channel'], '?')).strip()
-        pt  = str(row.get(COLS['ptype'], 'normal')).strip().lower()
-        pid = str(row.get(COLS['plan_id'], '')).strip()
-        own = str(row.get(COLS['owner'], '')).strip() or '未知'
-
-        if not d or d == 'nan' or d == COLS['date']:
+    for row in reader:
+        d   = row.get(COLS['date'], '').strip()
+        ch  = row.get(COLS['channel'], '?').strip()
+        pt  = row.get(COLS['ptype'], 'normal').strip().lower()
+        pid = row.get(COLS['plan_id'], '').strip()
+        own = row.get(COLS['owner'], '').strip() or '未知'
+        if not d or d == COLS['date']:
             continue
-
         try:
             c  = float(row.get(COLS['click'], 0) or 0)
             r  = float(row.get(COLS['reach'], 0) or 0)
@@ -93,48 +64,39 @@ def parse_csv(file_or_path):
             s  = float(row.get(COLS['sales'], 0) or 0)
             oc = float(row.get(COLS['order_click'], 0) or 0)
             rp = float(row.get(COLS['reach_plan'], 0) or 0)
-        except (ValueError, TypeError):
+        except:
             continue
 
         # 标准化日期：去前导零
         parts = d.split()[0].split('/')
-        if len(parts) < 3:
-            continue
         d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
 
         rows_raw.setdefault(d, {}).setdefault(ch, {}).setdefault(pt, {
-            'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0
+            'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
-        for k, v in [('click', c), ('reach', r), ('gc', g), ('sales', s),
-                      ('order_click', oc), ('reach_plan', rp)]:
+        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             rows_raw[d][ch][pt][k] += v
         plan_cnt_all.setdefault(d, {}).setdefault(ch, set()).add(pid)
 
         # owner 聚合（S4 数据源）
         owner_agg.setdefault(d, {}).setdefault(pt, {}).setdefault(own, {
-            'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0
+            'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
-        for k, v in [('click', c), ('reach', r), ('gc', g), ('sales', s),
-                      ('order_click', oc), ('reach_plan', rp)]:
+        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
             owner_agg[d][pt][own][k] += v
 
-    # 收集所有渠道（去重排序）
-    all_channels = sorted({ch for d in rows_raw for ch in rows_raw[d]})
-
-    # 收集所有计划类型（去重排序）
-    all_ptypes = sorted({pt for d in rows_raw for ch in rows_raw[d] for pt in rows_raw[d][ch]})
+    f.close()
 
     def _key(d):
         p = d.split('/')
         return (int(p[1]), int(p[2]))
-
     all_dates = sorted(rows_raw.keys(), key=_key)
-    return rows_raw, plan_cnt_all, owner_agg, all_dates, all_channels, all_ptypes
+    return rows_raw, plan_cnt_all, owner_agg, all_dates
 
 
 def calc_date_range(all_dates):
     """从数据中自动计算昨日/前日/周均日期范围
-
+    
     注意：返回的日期格式必须与 parse_csv 中 rows_raw 的 key 一致（去前导零）
     """
     if not all_dates:
@@ -144,16 +106,18 @@ def calc_date_range(all_dates):
     latest_dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
     prev_dt = latest_dt - timedelta(days=1)
     DATE_Y = latest  # 最新日期 = 昨日（已是去前导零格式）
+    # 前日：去前导零保持一致
     DATE_P = f"{prev_dt.year}/{prev_dt.month}/{prev_dt.day}"
+    # 上周7天：必须去前导零，与 rows_raw key 匹配！
     DATE_W = []
-    for i in range(1, 8):
+    for i in range(1, 8):  # 1~7天前
         d = latest_dt - timedelta(days=i)
         DATE_W.append(f"{d.year}/{d.month}/{d.day}")
     return DATE_Y, DATE_P, DATE_W
 
 
 def totals_all(rows_raw, dates):
-    t = {'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0}
+    t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
         if d not in rows_raw:
             continue
@@ -165,7 +129,7 @@ def totals_all(rows_raw, dates):
 
 
 def ch_totals(rows_raw, ch, dates):
-    t = {'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0}
+    t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
         if d not in rows_raw or ch not in rows_raw[d]:
             continue
@@ -176,7 +140,7 @@ def ch_totals(rows_raw, ch, dates):
 
 
 def agg_ch_pt(rows_raw, ch, ptype, dates):
-    t = {'click': 0, 'reach': 0, 'gc': 0, 'sales': 0, 'order_click': 0, 'reach_plan': 0}
+    t = {'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0}
     for d in dates:
         if d not in rows_raw or ch not in rows_raw[d]:
             continue
@@ -187,15 +151,13 @@ def agg_ch_pt(rows_raw, ch, ptype, dates):
     return t
 
 
-def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, all_ptypes=None):
+def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
     """计算 S4 按 Owner 数据
     返回: {
-        ptype:  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
-        ...
+        'aarr':  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
+        'normal': [...]
     }
     """
-    if all_ptypes is None:
-        all_ptypes = ['aarr', 'normal']
     METRICS = ['reach', 'click', 'order_click', 'gc', 'sales', 'reach_plan']
 
     def _sum(dates, ptype, owner):
@@ -213,7 +175,7 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, all_ptypes=None):
         return m['click'] / m['reach'] * 100 if m['reach'] else 0
 
     result = {}
-    for ptype in all_ptypes:
+    for ptype in ['aarr', 'normal']:
         owners = set()
         for d, pts in owner_agg.items():
             if ptype in pts:
@@ -222,30 +184,30 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, all_ptypes=None):
         rows = []
         for owner in sorted(owners):
             yd = _sum([DATE_Y], ptype, owner)
-            pd_val = _sum([DATE_P], ptype, owner)
+            pd = _sum([DATE_P], ptype, owner)
             wd = _sum(DATE_W, ptype, owner)
             rows.append({
                 'owner': owner,
                 'reach_plan_y': yd['reach_plan'],
-                'reach_plan_p': pd_val['reach_plan'],
+                'reach_plan_p': pd['reach_plan'],
                 'reach_plan_w': wd['reach_plan'] / 7,
                 'reach_y': yd['reach'],
-                'reach_p': pd_val['reach'],
+                'reach_p': pd['reach'],
                 'reach_w': wd['reach'] / 7,
                 'click_y': yd['click'],
-                'click_p': pd_val['click'],
+                'click_p': pd['click'],
                 'click_w': wd['click'] / 7,
                 'order_click_y': yd['order_click'],
-                'order_click_p': pd_val['order_click'],
+                'order_click_p': pd['order_click'],
                 'order_click_w': wd['order_click'] / 7,
                 'ctr_y': _ctr(yd),
-                'ctr_p': _ctr(pd_val),
+                'ctr_p': _ctr(pd),
                 'ctr_w': _ctr(wd),
                 'gc_y': yd['gc'],
-                'gc_p': pd_val['gc'],
+                'gc_p': pd['gc'],
                 'gc_w': wd['gc'] / 7,
                 'sales_y': yd['sales'],
-                'sales_p': pd_val['sales'],
+                'sales_p': pd['sales'],
                 'sales_w': wd['sales'] / 7,
             })
         result[ptype] = rows
