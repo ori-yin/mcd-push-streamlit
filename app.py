@@ -696,46 +696,6 @@ with col2:
 
 
 
-            # ===== S4: 按计划类型 x 预算 Owner ========================
-
-            SEND_DATE = 'send_date'
-
-            PTYPE_COL = '计划类型'
-
-            CLICK_COL = '点击人次'
-
-            REACH_COL = '触达成功'
-
-            GC_COL    = '订单GC'
-
-            SALES_COL = '订单Sales'
-
-            ORDER_COL = '点击后下单人次'
-
-            PLAN_COL  = '预计触达'
-
-
-
-            s4_html = ''
-
-            s4_chart_owners_js = '[]'
-
-            s4_chart_y_js = '[]'
-
-            s4_chart_w_js = '[]'
-
-
-
-
-
-            if owner_agg:
-
-                s4_by_ptype = {}
-
-
-
-                
-            # ── S4 数据（直接用 parse_csv 返回的 owner_agg）──────────
             s4_result = calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W)
 
             OWNER_ORDER = ['Reach','BF','McCafe','Membership','MDS','Field MKT','Chicken','OMM','[NULL]']
