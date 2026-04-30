@@ -14,30 +14,97 @@ import json, csv, io
 import pandas as pd
 from io import BytesIO
 # 字段名映射
-COLS = {
-    'date': '发送日期',
-    'channel': '渠道',
-    'ptype': '计划类型',
-    'plan_id': 'Plan ID',
-    'plan_name': 'Plan名称',
-    'owner': '预算owner',
-    'coupon': '是否用券',
-    'reach_plan': '预计触达',
-    'reach': '触达成功',
-    'click': '点击人次',
-    'order_click': '点击后下单人次',
-    'gc': '订单GC',
-    'sales': '订单Sales',
-}
+# ══ 列名智能推断（不再写死中文字段名）═════════
+# 从 CSV 实际列名动态推断每个字段用途
+def _infer_cols(columns):
+    """根据列名关键词推断字段映射"""
+    col_lower = {str(c).strip(): str(c).strip() for c in columns}
+    guess = {}
+    
+    # 日期列
+    for kw in ['发送日期', 'send_date', '日期', 'date']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['date'] = c; break
+        if 'date' in guess: break
+    
+    # 渠道
+    for kw in ['渠道', 'channel']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['channel'] = c; break
+        if 'channel' in guess: break
+    
+    # 计划类型
+    for kw in ['计划类型', 'ptype', 'type']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['ptype'] = c; break
+        if 'ptype' in guess: break
+    
+    # Plan ID
+    for kw in ['plan_id', 'plan id', 'planid']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['plan_id'] = c; break
+        if 'plan_id' in guess: break
+    
+    # Owner
+    for kw in ['owner', '预算owner', '预算', '负责人']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['owner'] = c; break
+        if 'owner' in guess: break
+    
+    # 点击
+    for kw in ['点击人次', 'click']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['click'] = c; break
+        if 'click' in guess: break
+    
+    # 触达成功
+    for kw in ['触达成功', 'reach', '成功触达']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['reach'] = c; break
+        if 'reach' in guess: break
+    
+    # 订单GC
+    for kw in ['订单gc', 'gc', 'order_gc']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['gc'] = c; break
+        if 'gc' in guess: break
+    
+    # 订单Sales
+    for kw in ['订单sales', 'sales', 'order_sales']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['sales'] = c; break
+        if 'sales' in guess: break
+    
+    # 点击后下单
+    for kw in ['点击后下单人次', 'order_click', '下单点击']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['order_click'] = c; break
+        if 'order_click' in guess: break
+    
+    # 预计触达 / reach_plan
+    for kw in ['预计触达', 'reach_plan', 'reachplan', '预估触达']:
+        for c, cl in col_lower.items():
+            if kw in cl:
+                guess['reach_plan'] = c; break
+        if 'reach_plan' in guess: break
+    
+    return guess
+
+
 
 
 def parse_csv(file_or_path):
-    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates)
-
-    rows_raw:    date -> channel -> ptype -> metrics
-    plan_cnt_all: date -> channel -> set(plan_id)
-    owner_agg:   date -> ptype -> owner -> metrics
-    all_dates:   sorted list of dates
+    """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates, col_map, raw_df, ch_list, ptypes_seen)
     """
     rows_raw     = {}
     plan_cnt_all = {}
@@ -47,7 +114,6 @@ def parse_csv(file_or_path):
     df = None
 
     if hasattr(file_or_path, 'read'):
-        # 上传文件对象：读原始字节，直接给 pandas 尝试各编码
         bytes_data = file_or_path.read()
         for enc in encodings:
             try:
@@ -58,7 +124,6 @@ def parse_csv(file_or_path):
         if df is None:
             raise ValueError("无法读取 CSV 文件，请检查文件格式")
     else:
-        # 文件路径
         for enc in encodings:
             try:
                 df = pd.read_csv(file_or_path, encoding=enc, on_bad_lines='skip')
@@ -68,28 +133,46 @@ def parse_csv(file_or_path):
         else:
             df = pd.read_csv(file_or_path, encoding='utf-8', on_bad_lines='skip')
 
-    # 列名标准化
-    date_col = None
-    for col in df.columns:
-        if col.strip() == COLS['date']:
-            date_col = col
-            break
-    if date_col is None:
-        raise ValueError(f"找不到日期列 '{COLS['date']}'，实际列名：{list(df.columns)}")
+    # 动态推断列名
+    col_map = _infer_cols(df.columns.tolist())
+    date_col = col_map.get('date', '')
+    if not date_col:
+        raise ValueError(f"找不到日期列。实际列名：{list(df.columns)}")
+
+    def g(col_key, default=0):
+        cn = col_map.get(col_key, '')
+        if not cn or cn not in df.columns:
+            return default
+        return cn  # 返回列名，让调用方用 row.get()
+
+    channels_seen = set()
+    ptypes_seen   = set()
+    owners_seen   = set()
 
     for _, row in df.iterrows():
-        d   = str(row[date_col]).strip() if pd.notna(row[date_col]) else ''
-        ch  = str(row.get(COLS.get('channel',''), '?')).strip()
-        pt  = str(row.get(COLS.get('ptype',''), 'normal')).strip().lower()
-        pid = str(row.get(COLS.get('plan_id',''), '')).strip()
-        own = str(row.get(COLS.get('owner',''), '')).strip() or '未知'
-
-        if not d or d == str(COLS['date']):
+        d = str(row[date_col]).strip() if pd.notna(row[date_col]) else ''
+        if not d or d == str(date_col):
             continue
 
-        def g(col_key, default=0):
-            cn = COLS.get(col_key, '')
-            if not cn:
+        # 规范化日期
+        raw_d = d.split()[0].replace('-', '/')
+        parts = raw_d.split('/')
+        if len(parts) != 3:
+            continue
+        d_fmt = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
+
+        ch  = str(row.get(g('channel', ''), '?')).strip()
+        pt  = str(row.get(g('ptype', ''), 'normal')).strip().lower() or 'normal'
+        pid = str(row.get(g('plan_id', ''), '')).strip()
+        own = str(row.get(g('owner', ''), '')).strip() or '未知'
+
+        channels_seen.add(ch)
+        ptypes_seen.add(pt)
+        owners_seen.add(own)
+
+        def m(col_key, default=0):
+            cn = col_map.get(col_key, '')
+            if not cn or cn not in df.columns:
                 return default
             val = row.get(cn, default)
             try:
@@ -97,34 +180,35 @@ def parse_csv(file_or_path):
             except (ValueError, TypeError):
                 return default
 
-        c  = g('click', 0)
-        r  = g('reach', 0)
-        gv = g('gc', 0)
-        s  = g('sales', 0)
-        oc = g('order_click', 0)
-        rp = g('reach_plan', 0)
+        c  = m('click', 0)
+        r  = m('reach', 0)
+        gv = m('gc', 0)
+        s  = m('sales', 0)
+        oc = m('order_click', 0)
+        rp = m('reach_plan', 0)
 
-        parts = d.split()[0].split('/')
-        d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
-
-        rows_raw.setdefault(d, {}).setdefault(ch, {}).setdefault(pt, {
+        rows_raw.setdefault(d_fmt, {}).setdefault(ch, {}).setdefault(pt, {
             'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
         for k, v in [('click',c),('reach',r),('gc',gv),('sales',s),('order_click',oc),('reach_plan',rp)]:
-            rows_raw[d][ch][pt][k] += v
-        plan_cnt_all.setdefault(d, {}).setdefault(ch, set()).add(pid)
+            rows_raw[d_fmt][ch][pt][k] += v
+        plan_cnt_all.setdefault(d_fmt, {}).setdefault(ch, set()).add(pid)
 
-        owner_agg.setdefault(d, {}).setdefault(pt, {}).setdefault(own, {
+        owner_agg.setdefault(d_fmt, {}).setdefault(pt, {}).setdefault(own, {
             'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
         for k, v in [('click',c),('reach',r),('gc',gv),('sales',s),('order_click',oc),('reach_plan',rp)]:
-            owner_agg[d][pt][own][k] += v
+            owner_agg[d_fmt][pt][own][k] += v
 
     def _key(d):
         p = d.split('/')
         return (int(p[1]), int(p[2]))
     all_dates = sorted(rows_raw.keys(), key=_key)
-    return rows_raw, plan_cnt_all, owner_agg, all_dates
+    ch_list = sorted(channels_seen)
+
+    return rows_raw, plan_cnt_all, owner_agg, all_dates, col_map, df, ch_list, ptypes_seen
+
+
 def calc_date_range(all_dates):
     """从数据中自动计算昨日/前日/周均日期范围
     
@@ -182,7 +266,8 @@ def agg_ch_pt(rows_raw, ch, ptype, dates):
     return t
 
 
-def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
+def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, ptypes_seen=None):
+    if ptypes_seen is None: ptypes_seen = {'aarr', 'normal'}
     """计算 S4 按 Owner 数据
     返回: {
         'aarr':  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
@@ -206,7 +291,7 @@ def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W):
         return m['click'] / m['reach'] * 100 if m['reach'] else 0
 
     result = {}
-    for ptype in ['aarr', 'normal']:
+    for ptype in sorted(ptypes_seen or ['aarr', 'normal']):
         owners = set()
         for d, pts in owner_agg.items():
             if ptype in pts:
@@ -400,7 +485,7 @@ with col2:
 
         try:
 
-            rows_raw, plan_cnt_all, owner_agg, all_dates = parse_csv(uploaded)
+            rows_raw, plan_cnt_all, owner_agg, all_dates, col_map, raw_df, ch_list, ptypes_seen = parse_csv(uploaded)
 
             DATE_Y, DATE_P, DATE_W = calc_date_range(all_dates)
 
@@ -434,7 +519,7 @@ with col2:
 
 
 
-            ch_list = ["APP Push", "企微1v1", "微信小程序订阅消息", "短信"]
+            ch_list = sorted(channels_seen)  # 动态从 CSV 发现
 
             CH_NAMES = {
 
@@ -614,9 +699,9 @@ with col2:
 
             # ── S3 渠道 × 计划类型 ─────────────────────────────────
 
-            PTYPE_ORDER = ["aarr", "normal"]
+            PTYPE_ORDER = sorted(ptypes_seen)  # 动态从 CSV 发现
 
-            PTYPE_LABELS = {"aarr": "AARR", "normal": "Normal"}
+            PTYPE_LABELS = {pt: pt.upper() for pt in ptypes_seen}
 
 
 
@@ -722,10 +807,18 @@ with col2:
 
 
 
-            s4_result = calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W)
+            s4_result = calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, ptypes_seen)
 
-            OWNER_ORDER = ['Reach','BF','McCafe','Membership','MDS','Field MKT','Chicken','OMM','[NULL]']
-            PTYPE_S4    = [('aarr','AARR'), ('normal','Normal')]
+            # 按昨日触达量降序排列 owner（动态）
+            owner_reach = {}
+            for d, pts in owner_agg.items():
+                for pt, owners in pts.items():
+                    for own, m in owners.items():
+                        owner_reach[own] = owner_reach.get(own, 0) + m.get('reach', 0)
+            OWNER_ORDER = sorted(owner_reach.keys(), key=lambda o: owner_reach.get(o, 0), reverse=True)
+            if not OWNER_ORDER:
+                OWNER_ORDER = ['未知']
+            PTYPE_S4    = [(pt, pt.upper()) for pt in sorted(ptypes_seen)]
 
             s4_html = ''
             for pkey, ptype_label in PTYPE_S4:
@@ -774,11 +867,7 @@ with col2:
                             total += row.get(col, 0)
                 return total
 
-            owner_order_rev = {o: -i for i, o in enumerate(OWNER_ORDER)}
-            s4_chart_owners = sorted(
-                [o for o in OWNER_ORDER if s4_owner_reach(o, 'y') > 0],
-                key=lambda o: owner_order_rev.get(o, 0)
-            )
+            s4_chart_owners = [o for o in OWNER_ORDER if s4_owner_reach(o, 'y') > 0]
             s4_chart_y = [s4_owner_reach(o, 'y') for o in s4_chart_owners]
             s4_chart_w = [round(s4_owner_reach(o, 'w')) for o in s4_chart_owners]
             s4_chart_owners_js = json.dumps(s4_chart_owners, ensure_ascii=False)
