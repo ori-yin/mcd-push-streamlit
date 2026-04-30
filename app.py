@@ -9,6 +9,7 @@ app.py - 麦当劳 Push 日报生成器 (Streamlit Web App)
 """
 
 import streamlit as st
+import base64
 
 import json, csv, io
 import pandas as pd
@@ -1243,7 +1244,10 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 
             # 内嵌预览
 
-            st.components.v1.html(html, height=2400, scrolling=True)
+            # 用 iframe srcdoc 避免 Streamlit 转义 HTML 标签
+            b64 = base64.b64encode(html.encode('utf-8')).decode('ascii')
+            iframe_html = f'<iframe src="data:text/html;base64,{b64}" style="width:100%;height:2400px;border:none;" scrolling="yes"></iframe>'
+            st.components.v1.html(iframe_html, height=2420, scrolling=True)
 
 
 
