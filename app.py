@@ -12,6 +12,7 @@ import streamlit as st
 
 import json, csv, io
 import pandas as pd
+from io import BytesIO
 # 字段名映射
 COLS = {
     'date': 'send_date',
@@ -42,25 +43,23 @@ def parse_csv(file_or_path):
     plan_cnt_all = {}
     owner_agg    = {}
 
-    # 读取文件（支持上传对象或路径）
-    # 按字节读取，避免提前解码错误；让 pandas 自己检测编码
+    encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
+    df = None
+
     if hasattr(file_or_path, 'read'):
-        raw = file_or_path.read()
-        if isinstance(raw, str):
-            text = raw
-        else:
-            text = None
-            for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
-                try:
-                    text = raw.decode(enc)
-                    break
-                except (UnicodeDecodeError, AttributeError):
-                    continue
-            if text is None:
-                text = raw.decode('utf-8', errors='replace')
-        df = pd.read_csv(io.StringIO(text), on_bad_lines='skip')
+        # 上传文件对象：读原始字节，直接给 pandas 尝试各编码
+        bytes_data = file_or_path.read()
+        for enc in encodings:
+            try:
+                df = pd.read_csv(BytesIO(bytes_data), encoding=enc, on_bad_lines='skip')
+                break
+            except Exception:
+                continue
+        if df is None:
+            raise ValueError("无法读取 CSV 文件，请检查文件格式")
     else:
-        for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
+        # 文件路径
+        for enc in encodings:
             try:
                 df = pd.read_csv(file_or_path, encoding=enc, on_bad_lines='skip')
                 break
