@@ -1266,7 +1266,7 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 
             # 内嵌预览
 
-            st.markdown(html, unsafe_allow_html=True)
+            st.components.v1.html(html, height=2500, scrolling=True)
 
 
 
