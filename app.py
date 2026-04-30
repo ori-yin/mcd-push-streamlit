@@ -1266,9 +1266,7 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 
             # 内嵌预览
 
-            srcdoc = html.replace("\"", "&quot;").replace("\n", "\\n").replace("\r", "\\r")
-            iframe = f"<iframe srcdoc=\"{srcdoc}\" style=\"width:100%;height:2400px;border:none;\"></iframe>"
-            st.components.v1.html(iframe, height=2440, scrolling=True)
+            st.markdown(html, unsafe_allow_html=True)
 
 
 
