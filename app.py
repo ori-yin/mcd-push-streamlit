@@ -519,7 +519,6 @@ with col2:
 
 
 
-            ch_list = sorted(channels_seen)  # 动态从 CSV 发现
 
             CH_NAMES = {
 
