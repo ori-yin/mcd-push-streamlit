@@ -1265,7 +1265,7 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 
 
             # 内嵌预览（用 iframe srcdoc 避免 HTML 被转义）
-            escaped = html.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+            escaped = html.replace('\\', '&#92;').replace('"', '&#34;').replace('\n', '&#10;').replace('\r', '&#13;')
             iframe = f'<iframe srcdoc="{escaped}" style="width:100%;height:2500px;border:none;"></iframe>'
             st.components.v1.html(iframe, height=2560, scrolling=True)
 
