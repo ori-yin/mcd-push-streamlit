@@ -58,7 +58,7 @@ def parse_csv(file_or_path):
                     continue
             if text is None:
                 text = raw.decode('utf-8', errors='replace')
-        df = pd.read_csv(_io.StringIO(text), on_bad_lines='skip')
+        df = pd.read_csv(io.StringIO(text), on_bad_lines='skip')
     else:
         for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
             try:
