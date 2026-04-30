@@ -33,9 +33,9 @@ COLS = {
 def parse_csv(file_or_path):
     """解析 CSV，返回 (rows_raw, plan_cnt_all, owner_agg, all_dates)
 
-    rows_raw:    date → channel → ptype → metrics
-    plan_cnt_all: date → channel → set(plan_id)
-    owner_agg:   date → ptype → owner → metrics
+    rows_raw:    date -> channel -> ptype -> metrics
+    plan_cnt_all: date -> channel -> set(plan_id)
+    owner_agg:   date -> ptype -> owner -> metrics
     all_dates:   sorted list of dates
     """
     rows_raw     = {}
@@ -43,23 +43,33 @@ def parse_csv(file_or_path):
     owner_agg    = {}
 
     # 读取文件（支持上传对象或路径）
+    # 按字节读取，避免提前解码错误；让 pandas 自己检测编码
     if hasattr(file_or_path, 'read'):
         raw = file_or_path.read()
-        text = raw.decode('utf-8') if isinstance(raw, bytes) else raw
-        # 尝试多种编码（与 mcd-content-rank 保持一致）
-        df = None
+        if isinstance(raw, str):
+            text = raw
+        else:
+            text = None
+            for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
+                try:
+                    text = raw.decode(enc)
+                    break
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+            if text is None:
+                text = raw.decode('utf-8', errors='replace')
+        df = pd.read_csv(_io.StringIO(text), on_bad_lines='skip')
+    else:
         for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
             try:
-                df = pd.read_csv(_io.StringIO(text), encoding=enc, on_bad_lines='skip')
+                df = pd.read_csv(file_or_path, encoding=enc, on_bad_lines='skip')
                 break
-            except Exception:
+            except UnicodeDecodeError:
                 continue
-        if df is None:
-            raise ValueError("无法读取 CSV 文件，请检查文件格式")
-    else:
-        df = pd.read_csv(file_or_path, encoding='utf-8', on_bad_lines='skip')
+        else:
+            df = pd.read_csv(file_or_path, encoding='utf-8', on_bad_lines='skip')
 
-    # 列名标准化：模糊匹配（支持空格差异）
+    # 列名标准化
     date_col = None
     for col in df.columns:
         if col.strip() == COLS['date']:
@@ -95,7 +105,6 @@ def parse_csv(file_or_path):
         oc = g('order_click', 0)
         rp = g('reach_plan', 0)
 
-        # 标准化日期，去前后缀
         parts = d.split()[0].split('/')
         d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
 
