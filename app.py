@@ -11,6 +11,7 @@ app.py - 麦当劳 Push 日报生成器 (Streamlit Web App)
 import streamlit as st
 
 import json, csv, io
+import pandas as pd
 # 字段名映射
 COLS = {
     'date': 'send_date',
@@ -37,68 +38,85 @@ def parse_csv(file_or_path):
     owner_agg:   date → ptype → owner → metrics
     all_dates:   sorted list of dates
     """
-    rows_raw    = {}
+    rows_raw     = {}
     plan_cnt_all = {}
-    owner_agg   = {}
+    owner_agg    = {}
 
-    # 支持文件对象或路径
+    # 读取文件（支持上传对象或路径）
     if hasattr(file_or_path, 'read'):
-        pos = file_or_path.tell() if hasattr(file_or_path, 'tell') else 0
         raw = file_or_path.read()
         text = raw.decode('utf-8') if isinstance(raw, bytes) else raw
-        if hasattr(file_or_path, 'seek'):
-            file_or_path.seek(pos)
-        f = io.StringIO(text)
+        # 尝试多种编码（与 mcd-content-rank 保持一致）
+        df = None
+        for enc in ['utf-8', 'gbk', 'gb2312', 'latin1']:
+            try:
+                df = pd.read_csv(_io.StringIO(text), encoding=enc, on_bad_lines='skip')
+                break
+            except Exception:
+                continue
+        if df is None:
+            raise ValueError("无法读取 CSV 文件，请检查文件格式")
     else:
-        f = open(file_or_path, encoding='utf-8')
+        df = pd.read_csv(file_or_path, encoding='utf-8', on_bad_lines='skip')
 
-    reader = csv.DictReader(f)
+    # 列名标准化：模糊匹配（支持空格差异）
+    date_col = None
+    for col in df.columns:
+        if col.strip() == COLS['date']:
+            date_col = col
+            break
+    if date_col is None:
+        raise ValueError(f"找不到日期列 '{COLS['date']}'，实际列名：{list(df.columns)}")
 
-    for row in reader:
-        d   = row.get(COLS['date'], '').strip()
-        ch  = row.get(COLS['channel'], '?').strip()
-        pt  = row.get(COLS['ptype'], 'normal').strip().lower()
-        pid = row.get(COLS['plan_id'], '').strip()
-        own = row.get(COLS['owner'], '').strip() or '未知'
-        if not d or d == COLS['date']:
+    for _, row in df.iterrows():
+        d   = str(row[date_col]).strip() if pd.notna(row[date_col]) else ''
+        ch  = str(row.get(COLS.get('channel',''), '?')).strip()
+        pt  = str(row.get(COLS.get('ptype',''), 'normal')).strip().lower()
+        pid = str(row.get(COLS.get('plan_id',''), '')).strip()
+        own = str(row.get(COLS.get('owner',''), '')).strip() or '未知'
+
+        if not d or d == str(COLS['date']):
             continue
-        try:
-            c  = float(row.get(COLS['click'], 0) or 0)
-            r  = float(row.get(COLS['reach'], 0) or 0)
-            g  = float(row.get(COLS['gc'], 0) or 0)
-            s  = float(row.get(COLS['sales'], 0) or 0)
-            oc = float(row.get(COLS['order_click'], 0) or 0)
-            rp = float(row.get(COLS['reach_plan'], 0) or 0)
-        except:
-            continue
 
-        # 标准化日期：去前导零
+        def g(col_key, default=0):
+            cn = COLS.get(col_key, '')
+            if not cn:
+                return default
+            val = row.get(cn, default)
+            try:
+                return float(val) if pd.notna(val) else default
+            except (ValueError, TypeError):
+                return default
+
+        c  = g('click', 0)
+        r  = g('reach', 0)
+        gv = g('gc', 0)
+        s  = g('sales', 0)
+        oc = g('order_click', 0)
+        rp = g('reach_plan', 0)
+
+        # 标准化日期，去前后缀
         parts = d.split()[0].split('/')
         d = f"{parts[0]}/{int(parts[1])}/{int(parts[2])}"
 
         rows_raw.setdefault(d, {}).setdefault(ch, {}).setdefault(pt, {
             'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
-        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
+        for k, v in [('click',c),('reach',r),('gc',gv),('sales',s),('order_click',oc),('reach_plan',rp)]:
             rows_raw[d][ch][pt][k] += v
         plan_cnt_all.setdefault(d, {}).setdefault(ch, set()).add(pid)
 
-        # owner 聚合（S4 数据源）
         owner_agg.setdefault(d, {}).setdefault(pt, {}).setdefault(own, {
             'click':0,'reach':0,'gc':0,'sales':0,'order_click':0,'reach_plan':0
         })
-        for k, v in [('click',c),('reach',r),('gc',g),('sales',s),('order_click',oc),('reach_plan',rp)]:
+        for k, v in [('click',c),('reach',r),('gc',gv),('sales',s),('order_click',oc),('reach_plan',rp)]:
             owner_agg[d][pt][own][k] += v
-
-    f.close()
 
     def _key(d):
         p = d.split('/')
         return (int(p[1]), int(p[2]))
     all_dates = sorted(rows_raw.keys(), key=_key)
     return rows_raw, plan_cnt_all, owner_agg, all_dates
-
-
 def calc_date_range(all_dates):
     """从数据中自动计算昨日/前日/周均日期范围
     
