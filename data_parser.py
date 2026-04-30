@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 data_parser.py - 麦当劳 Push 日报数据解析模块
-支持 Streamlit 上传和本地 CSV 两种模式
 """
 import csv, io
 from datetime import datetime, timedelta
