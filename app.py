@@ -15,11 +15,11 @@ import pandas as pd
 from io import BytesIO
 # 字段名映射
 COLS = {
-    'date': 'send_date',
+    'date': '发送日期',
     'channel': '渠道',
     'ptype': '计划类型',
     'plan_id': 'Plan ID',
-    'plan_name': 'Plan Name',
+    'plan_name': 'Plan名称',
     'owner': '预算owner',
     'coupon': '是否用券',
     'reach_plan': '预计触达',
