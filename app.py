@@ -222,7 +222,7 @@ def parse_csv(file_or_path):
 
 
 
-    encodings = ['utf-8', 'gbk', 'gb2312', 'latin1']
+    encodings = ['gbk', 'utf-8', 'gb2312', 'latin1']
 
     df = None
 
