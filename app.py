@@ -135,6 +135,9 @@ def parse_csv(file_or_path):
 
     # 动态推断列名
     col_map = _infer_cols(df.columns.tolist())
+    # drop last column (JSON payload) if present
+    if df.shape[1] > 14:
+        df = df.iloc[:, :-1]
     date_col = col_map.get('date', '')
     if not date_col:
         raise ValueError(f"找不到日期列。实际列名：{list(df.columns)}")
@@ -622,29 +625,19 @@ with col2:
 
                 y_, p_, w_ = ty[m], tp[m], tw[m]/7
 
-                s1_rows += f'<tr><td class="metric-name">{metric_names[m]}</td>' \
+                s1_rows += (f'<tr><td class="metric-name">{metric_names[m]}</td>'
+                            f'<td class="right">{fmt(y_)}</td>'
+                            f'<td class="right">{fmt(p_)}</td>'
+                            f'<td class="right {ccls(y_,p_)}">{chg(y_,p_)}</td>'
+                            f'<td class="right">{fmt(w_)}</td>'
+                            f'<td class="right {ccls(y_,w_)}">{chg(y_,w_)}</td></tr>\n')
 
-                f'<td class="right">{fmt(y_)}</td>' \
-
-                f'<td class="right">{fmt(p_)}</td>' \
-
-                f'<td class="right {ccls(y_,p_)}">{chg(y_,p_)}</td>' \
-
-                f'<td class="right">{fmt(w_)}</td>' \
-
-                f'<td class="right {ccls(y_,w_)}">{chg(y_,w_)}</td></tr>\n'
-
-            s1_rows += f'<tr><td class="metric-name">CTR</td>' \
-
-            f'<td class="right">{ctr_y:.2f}%</td>' \
-
-            f'<td class="right">{ctr_p:.2f}%</td>' \
-
-            f'<td class="right {ccls(ctr_y,ctr_p)}">{pp(ctr_y,ctr_p)}</td>' \
-
-            f'<td class="right">{ctr_w:.2f}%</td>' \
-
-            f'<td class="right {ccls(ctr_y,ctr_w)}">{pp(ctr_y,ctr_w)}</td></tr>\n'
+            s1_rows += (f'<tr><td class="metric-name">CTR</td>'
+                        f'<td class="right">{ctr_y:.2f}%</td>'
+                        f'<td class="right">{ctr_p:.2f}%</td>'
+                        f'<td class="right {ccls(ctr_y,ctr_p)}">{pp(ctr_y,ctr_p)}</td>'
+                        f'<td class="right">{ctr_w:.2f}%</td>'
+                        f'<td class="right {ccls(ctr_y,ctr_w)}">{pp(ctr_y,ctr_w)}</td></tr>\n')
 
 
 
@@ -682,17 +675,12 @@ with col2:
 
                     vw = pp(y_v, w_v) if typ in ("ctr","pct") else chg(y_v, w_v)
 
-                    s2_rows += f'<tr><td class="metric-name">{CH_NAMES[ch]}</td>' \
-
-                    f'<td class="right">{fmt(y_v,typ)}</td>' \
-
-                    f'<td class="right">{fmt(p_v,typ)}</td>' \
-
-                    f'<td class="right {ccls(y_v,p_v)}">{vp}</td>' \
-
-                    f'<td class="right">{fmt(w_v,typ)}</td>' \
-
-                    f'<td class="right {ccls(y_v,w_v)}">{vw}</td></tr>\n'
+                    s2_rows += (f'<tr><td class="metric-name">{CH_NAMES[ch]}</td>'
+                                f'<td class="right">{fmt(y_v,typ)}</td>'
+                                f'<td class="right">{fmt(p_v,typ)}</td>'
+                                f'<td class="right {ccls(y_v,p_v)}">{vp}</td>'
+                                f'<td class="right">{fmt(w_v,typ)}</td>'
+                                f'<td class="right {ccls(y_v,w_v)}">{vw}</td></tr>\n')
 
 
 
@@ -748,17 +736,12 @@ with col2:
 
                         vw = pp(y_, wv) if is_ctr else chg(y_, wv)
 
-                        s3_html += f'<tr><td>{name}</td>' \
-
-                        f'<td class="right">{fmt(y_,typ_)}</td>' \
-
-                        f'<td class="right">{fmt(p_,typ_)}</td>' \
-
-                        f'<td class="right {ccls(y_,p_)}">{vp}</td>' \
-
-                        f'<td class="right">{fmt(wv,typ_)}</td>' \
-
-                        f'<td class="right {ccls(y_,wv)}">{vw}</td></tr>\n'
+                        s3_html += (f'<tr><td>{name}</td>'
+                                   f'<td class="right">{fmt(y_,typ_)}</td>'
+                                   f'<td class="right">{fmt(p_,typ_)}</td>'
+                                   f'<td class="right {ccls(y_,p_)}">{vp}</td>'
+                                   f'<td class="right">{fmt(wv,typ_)}</td>'
+                                   f'<td class="right {ccls(y_,wv)}">{vw}</td></tr>\n')
 
 
 
@@ -1261,12 +1244,6 @@ tr.sub-header td {{ background:#fafafa; font-weight:bold; font-size:11px; color:
 </body>
 
 </html>"""
-
-
-
-            # 内嵌预览
-
-            st.components.v1.html(html, height=2400, scrolling=True)
 
 
 
