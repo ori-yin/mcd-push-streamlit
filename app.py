@@ -464,9 +464,9 @@ with col2:
 
         <div style="background:#fff;border-radius:14px;padding:60px 40px;text-align:center;
 
-                    color:#999;border:1px solid #eee;box-shadow:0 2px 10px rgba(0,0,0,.03);">
+                    ">
 
-          <div style="font-size:52px;margin-bottom:16px;">📊</div>
+          <div style="font-size:32px;margin-bottom:12px;">.</div>
 
           <div style="font-size:16px;font-weight:700;color:#666;">上传 CSV 后点击「生成日报」</div>
 
