@@ -271,12 +271,6 @@ def agg_ch_pt(rows_raw, ch, ptype, dates):
 
 def calc_s4_data(owner_agg, DATE_Y, DATE_P, DATE_W, ptypes_seen=None):
     if ptypes_seen is None: ptypes_seen = set()
-    """计算 S4 按 Owner 数据
-    返回: {
-        'aarr':  [{owner, reach_y, reach_p, reach_w, ctr_y, ctr_p, ctr_w, ...}, ...],
-        'normal': [...]
-    }
-    """
     METRICS = ['reach', 'click', 'order_click', 'gc', 'sales', 'reach_plan']
 
     def _sum(dates, ptype, owner):
